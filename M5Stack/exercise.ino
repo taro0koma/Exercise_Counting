@@ -28,7 +28,19 @@ bool catEyesOpen = true;
 unsigned long lastBlinkTime = 0;
 const unsigned long BLINK_INTERVAL = 1500;  // 1.5秒ごとにまばたきをする
 bool needsBackgroundRedraw = false; // 背景の読み込みなおすかどうか
-
+uint16_t bgColors[] = {
+  M5.Lcd.color565(221,247,208),
+  M5.Lcd.color565(181,215,190),
+  M5.Lcd.color565(109,199,207),
+  M5.Lcd.color565(197,227,253), // ← 277は255を超えるので修正しました
+  M5.Lcd.color565(194,179,218),
+  M5.Lcd.color565(205,179,218),
+  M5.Lcd.color565(219,180,199),
+  M5.Lcd.color565(238,175,175),
+  M5.Lcd.color565(242,172,134),
+  M5.Lcd.color565(255,248,178)
+};
+const int bgColorCount = sizeof(bgColors) / sizeof(bgColors[0]);
 // 紙吹雪のパーティクル構造体
 struct Confetti {
   int x, y;
@@ -134,12 +146,11 @@ void updateConfetti() {
 //  ボタンを表示するのと処理の設定
 // =============================
 void drawButton(SimpleButton &btn) {
-  M5.Lcd.fillRoundRect(btn.x + 3, btn.y + 3, btn.w, btn.h, 12, btn.color);
-  M5.Lcd.fillRoundRect(btn.x+2, btn.y+2, btn.w+4, btn.h+4, 12, btn.color);
-  M5.Lcd.fillRoundRect(btn.x, btn.y, btn.w, btn.h, 12, WHITE);
+  M5.Lcd.fillRoundRect(btn.x + 3, btn.y + 3, btn.w, btn.h, 12, BLACK);
+  M5.Lcd.fillRoundRect(btn.x, btn.y, btn.w, btn.h, 12, btn.color);
   // M5.Lcd.drawRoundRect(btn.x, btn.y, btn.w, btn.h, 12, btn.color);
   M5.Lcd.loadFont(SD, "/genshin-regular-32pt.vlw");
-  M5.Lcd.setTextColor(BLACK);
+  M5.Lcd.setTextColor(WHITE);
   M5.Lcd.setTextSize(1.5);
 
   // 文字幅を取得して中央寄せ
@@ -185,7 +196,12 @@ void backHome() {
 }
 
 void drawExerciseScreen() {
-  M5.Lcd.fillScreen(WHITE);
+  int colorIndex = exerciseCount;
+  if (colorIndex >= bgColorCount) colorIndex = bgColorCount - 1;
+  uint16_t bgColor = bgColors[colorIndex];
+
+  M5.Lcd.fillScreen(bgColor);  // ← 背景を塗る
+  
 
   // M5.Display.drawPngFile(SD, "/Legs_up.png", 170, 0);
 
@@ -194,14 +210,15 @@ void drawExerciseScreen() {
 
 
   M5.Lcd.setTextColor(BLACK);
-  M5.Lcd.setTextSize(2.7);
-  M5.Lcd.setCursor(90, 90);
-  M5.Lcd.printf("%d回", exerciseCount);
+  M5.Lcd.setTextSize(5);
+  M5.Lcd.setCursor(107, 0);
+  M5.Lcd.printf("%d", exerciseCount);
 
   M5.Lcd.setTextColor(BLACK);
-  M5.Lcd.setTextSize(1);
-  M5.Lcd.setCursor(80, 190);
-  M5.Lcd.println("10回がんばろう！");
+  M5.Lcd.setTextSize(1.5);
+  M5.Lcd.setCursor(80, 180);
+  int remainingCount = 10-exerciseCount;
+  M5.Lcd.printf("あと %d回", remainingCount);
 }
 
 void drawCelebrationScreen() {
@@ -310,6 +327,7 @@ void updateExerciseCount() {
       
       // 画面を即座に更新
       drawExerciseScreen();
+      
       
       // 目標達成チェック
       if (exerciseCount >= 10) {
