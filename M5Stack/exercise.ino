@@ -70,6 +70,10 @@ SimpleButton startButton;
 // =============================
 void initConfetti() {
   needsBackgroundRedraw = true;
+  
+  // 紙吹雪を初期化する時だけrandomSeedを実行
+  randomSeed(analogRead(0));
+  
   for (int i = 0; i < 30; i++) {
     confetti[i].x = random(0, 320);
     confetti[i].y = random(-50, 0);
@@ -267,23 +271,33 @@ void drawCelebrationScreen() {
   needsBackgroundRedraw = false;
 }
 
-void playSound(const unsigned char* wavData, unsigned int wavLen) {
-  // 簡単なWAV再生
-  for (unsigned int i = 44; i < wavLen && i < wavLen; i++) {
-    dacWrite(25, wavData[i]);
-    delayMicroseconds(125); // 8kHz用
-  }
-  dacWrite(25, 0);
+void playWavFile(const char* path) {
+    File file = SD.open(path);
+    if (!file) {
+        M5.Display.println(String("Failed to open: ") + path);
+        return;
+    }
+
+    size_t fileSize = file.size();
+    uint8_t* buf = (uint8_t*)malloc(fileSize);
+    if (!buf) {
+        M5.Display.println("malloc failed!");
+        file.close();
+        return;
+    }
+
+    file.read(buf, fileSize);
+    file.close();
+
+    M5.Speaker.playWav(buf, fileSize);
+
+    while (M5.Speaker.isPlaying()) {
+        delay(1);
+    }
+
+    free(buf);
 }
 
-//音を鳴らしてみる
-void playTone() {
-  M5.Lcd.fillScreen(BLACK);
-  M5.Lcd.setCursor(0, 0);
-  M5.Lcd.print("Volume : ");
-  M5.Speaker.setVolume(0.1);
-  M5.Speaker.tone(440, 200);
-}
 
 // =============================
 //  ボタンコールバック
@@ -301,14 +315,14 @@ void onStartButton() {
 void updateExerciseCount() {
   if (Serial2.available()) {
     int ch = Serial2.read();
-    Serial.write(ch);  // エコーバック
+    // Serial.write(ch);  // エコーバック
     
     // デバッグ出力
-    Serial.print("Received: ");
-    Serial.print(ch);
-    Serial.print(" (0x");
-    Serial.print(ch, HEX);
-    Serial.print(") ");
+    // Serial.print("Received: ");
+    // Serial.print(ch);
+    // Serial.print(" (0x");
+    // Serial.print(ch, HEX);
+    // Serial.print(") ");
     
     // 文字として表示
     if (ch >= 32 && ch <= 126) {
@@ -320,10 +334,9 @@ void updateExerciseCount() {
     // '1'を受信したらカウントアップ（連続受信対策なし版）
     if (ch == '1') {
       exerciseCount++;
-      playTone();
-      // playMP3("/1.mp3");
-      Serial.print("-> COUNT UP! exerciseCount: ");
-      Serial.println(exerciseCount);
+      char wavFilePath[20];
+      sprintf(wavFilePath, "/%d.wav", exerciseCount);
+      playWavFile(wavFilePath);
       
       // 画面を即座に更新
       drawExerciseScreen();
@@ -336,8 +349,6 @@ void updateExerciseCount() {
         Serial.println("Goal reached! Switching to celebration screen.");
         drawCelebrationScreen();
       }
-    } else {
-      Serial.println("(ignored - not '1')");
     }
   }
 }
@@ -346,20 +357,25 @@ void updateExerciseCount() {
 //  setup / loop
 // =============================
 void setup() {
-  M5.begin();
+  auto cfg = M5.config();
+  M5.begin(cfg);
   Serial.begin(9600);
   Serial2.begin(9600, SERIAL_8N1, 32, 33);
 
   Serial.println("M5Stack Exercise Counter Starting...");
   Serial.println("Serial2 initialized on pins 32(RX), 33(TX)");
 
-  randomSeed(analogRead(0));
+  // randomSeed(analogRead(0));
   SPI.begin(SD_SPI_SCK_PIN, SD_SPI_MISO_PIN, SD_SPI_MOSI_PIN, SD_SPI_CS_PIN);
-  if (!SD.begin(SD_SPI_CS_PIN, SPI, 25000000)) {
-    M5.Display.print("\n SD card not detected\n");
-    Serial.println("SD card initialization failed!");
-    while (1)
-      ;
+  auto spk_cfg = M5.Speaker.config();
+  M5.Speaker.config(spk_cfg);
+  M5.Speaker.begin();
+  M5.Speaker.setVolume(255);
+
+  // SDカード初期化
+  if (!SD.begin(GPIO_NUM_4, SPI, 25000000)) {
+      M5.Display.println("SD init failed!");
+      return;
   }
   
   Serial.println("SD card initialized successfully");
