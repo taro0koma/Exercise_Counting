@@ -6,7 +6,6 @@
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
 
-
 #define SD_SPI_CS_PIN 4
 #define SD_SPI_SCK_PIN 18
 #define SD_SPI_MISO_PIN 38
@@ -14,20 +13,22 @@
 
 enum Screen {
   HOME_SCREEN,
+  PREPARATION_SCREEN,  // 新しく追加した準備画面
   EXERCISE_SCREEN,
   CELEBRATION_SCREEN
 };
-
-
 
 Screen currentScreen = HOME_SCREEN;
 int latestValue = 0;
 int exerciseCount = 0;
 unsigned long celebrationStartTime = 0;
+unsigned long preparationStartTime = 0;  // 準備画面の開始時間
 bool catEyesOpen = true;
 unsigned long lastBlinkTime = 0;
 const unsigned long BLINK_INTERVAL = 1500;  // 1.5秒ごとにまばたきをする
 bool needsBackgroundRedraw = false; // 背景の読み込みなおすかどうか
+bool randomSeedInitialized = false;  // randomSeedが初期化されたかを管理
+
 uint16_t bgColors[] = {
   M5.Lcd.color565(221,247,208),
   M5.Lcd.color565(181,215,190),
@@ -41,6 +42,7 @@ uint16_t bgColors[] = {
   M5.Lcd.color565(255,248,178)
 };
 const int bgColorCount = sizeof(bgColors) / sizeof(bgColors[0]);
+
 // 紙吹雪のパーティクル構造体
 struct Confetti {
   int x, y;
@@ -66,13 +68,53 @@ struct SimpleButton {
 SimpleButton startButton;
 
 // =============================
-//  おめでとうの紙ふぶきをちらす設定
+//  音声ファイル再生（ノイズ対策済み）
+// =============================
+void playWavFile(const char* path) {
+    // 音声再生前にSpeakerを一度停止してクリアな再生を保証
+    M5.Speaker.stop();
+    delay(10);
+    
+    File file = SD.open(path);
+    if (!file) {
+        M5.Display.println(String("Failed to open: ") + path);
+        return;
+    }
+
+    size_t fileSize = file.size();
+    uint8_t* buf = (uint8_t*)malloc(fileSize);
+    if (!buf) {
+        M5.Display.println("malloc failed!");
+        file.close();
+        return;
+    }
+
+    file.read(buf, fileSize);
+    file.close();
+
+    M5.Speaker.playWav(buf, fileSize);
+
+    while (M5.Speaker.isPlaying()) {
+        delay(1);
+        M5.update();  // M5.update()を呼び続けることで他の処理を妨げない
+    }
+
+    free(buf);
+    delay(100);  // 音声終了後に少し待機してノイズを防ぐ
+}
+
+// =============================
+//  おめでとうの紙ふぶきをちらす設定（ノイズ対策済み）
 // =============================
 void initConfetti() {
   needsBackgroundRedraw = true;
   
-  // 紙吹雪を初期化する時だけrandomSeedを実行
-  randomSeed(analogRead(0));
+  // randomSeedは一度だけ初期化（ノイズ対策）
+  if (!randomSeedInitialized) {
+    randomSeed(analogRead(0));
+    randomSeedInitialized = true;
+    delay(50);  // randomSeed後に少し待機
+  }
   
   for (int i = 0; i < 30; i++) {
     confetti[i].x = random(0, 320);
@@ -86,21 +128,6 @@ void initConfetti() {
     confetti[i].wasActive = false;
   }
 }
-
-// // 音声のMP3をつかう
-// void playMP3(char *filename){
-//   file = new AudioFileSourceSD(filename);
-//   id3 = new AudioFileSourceID3(file);
-//   out = new AudioOutputI2S(0, 1); // Output to builtInDAC
-//   out->SetOutputModeMono(true);
-//   out->SetGain(1.0);
-//   mp3 = new AudioGeneratorMP3();
-//   mp3->begin(id3, out);
-//   while(mp3->isRunning()) {
-//     if (!mp3->loop()) mp3->stop();
-//   }
-// }
-
 
 void updateConfetti() {
   // 今は紙ふぶきを散らしているかどうかチェック
@@ -152,7 +179,6 @@ void updateConfetti() {
 void drawButton(SimpleButton &btn) {
   M5.Lcd.fillRoundRect(btn.x + 3, btn.y + 3, btn.w, btn.h, 12, BLACK);
   M5.Lcd.fillRoundRect(btn.x, btn.y, btn.w, btn.h, 12, btn.color);
-  // M5.Lcd.drawRoundRect(btn.x, btn.y, btn.w, btn.h, 12, btn.color);
   M5.Lcd.loadFont(SD, "/genshin-regular-32pt.vlw");
   M5.Lcd.setTextColor(WHITE);
   M5.Lcd.setTextSize(1.5);
@@ -194,6 +220,26 @@ void drawHomeScreen() {
   drawButton(startButton);
 }
 
+void drawPreparationScreen() {
+  M5.Lcd.fillScreen(M5.Lcd.color565(255, 248, 178));  // 淡い黄色の背景
+  
+  // 猫の画像を小さめに表示
+  int imgW = 120;
+  int imgH = 120;
+  int x = (M5.Lcd.width() - imgW) / 2;
+  int y = 30;
+
+  M5.Display.drawPngFile(SD, "/YellowCat2.png", x, y);
+
+  // メッセージを表示
+  M5.Lcd.setTextColor(M5.Lcd.color565(31, 117, 0));
+  M5.Lcd.setTextSize(1.3);
+  M5.Lcd.setCursor(46, 144);
+  M5.Lcd.println("ゆっくり大きく");
+  M5.Lcd.setCursor(60, 180);
+  M5.Lcd.println("運動してね！");
+}
+
 void backHome() {
   currentScreen = HOME_SCREEN;
   drawHomeScreen();
@@ -206,13 +252,6 @@ void drawExerciseScreen() {
 
   M5.Lcd.fillScreen(bgColor);  // ← 背景を塗る
   
-
-  // M5.Display.drawPngFile(SD, "/Legs_up.png", 170, 0);
-
-  // startButton = { 10, 80, 300, 80, "途中で終わる", RED, backHome };
-  // drawButton(startButton);
-
-
   M5.Lcd.setTextColor(BLACK);
   M5.Lcd.setTextSize(5);
   M5.Lcd.setCursor(107, 0);
@@ -271,38 +310,20 @@ void drawCelebrationScreen() {
   needsBackgroundRedraw = false;
 }
 
-void playWavFile(const char* path) {
-    File file = SD.open(path);
-    if (!file) {
-        M5.Display.println(String("Failed to open: ") + path);
-        return;
-    }
-
-    size_t fileSize = file.size();
-    uint8_t* buf = (uint8_t*)malloc(fileSize);
-    if (!buf) {
-        M5.Display.println("malloc failed!");
-        file.close();
-        return;
-    }
-
-    file.read(buf, fileSize);
-    file.close();
-
-    M5.Speaker.playWav(buf, fileSize);
-
-    while (M5.Speaker.isPlaying()) {
-        delay(1);
-    }
-
-    free(buf);
-}
-
-
 // =============================
-//  ボタンコールバック
+//  ボタンコールバック（修正版）
 // =============================
 void onStartButton() {
+  // 準備画面に移行
+  currentScreen = PREPARATION_SCREEN;
+  preparationStartTime = millis();
+  Serial.println("Moving to preparation screen");
+  drawPreparationScreen();
+  
+  // start.wavを再生（ノイズ対策済み）
+  playWavFile("/start.wav");
+  
+  // 音声再生後、運動画面に移行
   currentScreen = EXERCISE_SCREEN;
   exerciseCount = 0;
   Serial.println("Exercise started. Count reset to 0.");
@@ -315,21 +336,6 @@ void onStartButton() {
 void updateExerciseCount() {
   if (Serial2.available()) {
     int ch = Serial2.read();
-    // Serial.write(ch);  // エコーバック
-    
-    // デバッグ出力
-    // Serial.print("Received: ");
-    // Serial.print(ch);
-    // Serial.print(" (0x");
-    // Serial.print(ch, HEX);
-    // Serial.print(") ");
-    
-    // 文字として表示
-    if (ch >= 32 && ch <= 126) {
-      Serial.print("char: '");
-      Serial.write(ch);
-      Serial.print("' ");
-    }
     
     // '1'を受信したらカウントアップ（連続受信対策なし版）
     if (ch == '1') {
@@ -340,7 +346,6 @@ void updateExerciseCount() {
       
       // 画面を即座に更新
       drawExerciseScreen();
-      
       
       // 目標達成チェック
       if (exerciseCount >= 10) {
@@ -365,7 +370,6 @@ void setup() {
   Serial.println("M5Stack Exercise Counter Starting...");
   Serial.println("Serial2 initialized on pins 32(RX), 33(TX)");
 
-  // randomSeed(analogRead(0));
   SPI.begin(SD_SPI_SCK_PIN, SD_SPI_MISO_PIN, SD_SPI_MOSI_PIN, SD_SPI_CS_PIN);
   auto spk_cfg = M5.Speaker.config();
   M5.Speaker.config(spk_cfg);
@@ -396,6 +400,17 @@ void loop() {
       if (M5.BtnA.wasPressed()) {
         Serial.println("Button A pressed - starting exercise");
         onStartButton();
+      }
+      break;
+
+    case PREPARATION_SCREEN:
+      // 準備画面では特に何もしない（音声再生中）
+      // 音声が終了したらonStartButton内で自動的にEXERCISE_SCREENに移行
+      if (M5.BtnB.wasPressed()) {
+        Serial.println("Button B pressed - returning to home from preparation");
+        currentScreen = HOME_SCREEN;
+        M5.Speaker.stop();  // 音声を停止
+        drawHomeScreen();
       }
       break;
 
