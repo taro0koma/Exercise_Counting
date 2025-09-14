@@ -23,6 +23,7 @@ int latestValue = 0;
 int exerciseCount = 0;
 unsigned long celebrationStartTime = 0;
 unsigned long preparationStartTime = 0;  // 準備画面の開始時間
+unsigned long exerciseStartTime = 0;     // 運動開始時間（新規追加）
 bool catEyesOpen = true;
 unsigned long lastBlinkTime = 0;
 const unsigned long BLINK_INTERVAL = 1500;  // 1.5秒ごとにまばたきをする
@@ -326,14 +327,25 @@ void onStartButton() {
   // 音声再生後、運動画面に移行
   currentScreen = EXERCISE_SCREEN;
   exerciseCount = 0;
+  exerciseStartTime = millis();  // 運動開始時間を記録
   Serial.println("Exercise started. Count reset to 0.");
+  Serial.println("Counting will start after 1 second delay.");
   drawExerciseScreen();
 }
 
 // =============================
-//  運動カウント（受信ベース）
+//  運動カウント（受信ベース・0.8秒遅延対応）
 // =============================
 void updateExerciseCount() {
+  // 運動開始から0.8秒経過していない場合は何もしない
+  if (millis() - exerciseStartTime < 800) {
+    // シリアルバッファをクリアして開始直後のデータを破棄
+    while (Serial2.available()) {
+      Serial2.read();
+    }
+    return;
+  }
+  
   if (Serial2.available()) {
     int ch = Serial2.read();
     
